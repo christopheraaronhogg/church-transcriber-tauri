@@ -1,0 +1,276 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: #f8f7f3;
+  background: #11130f;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 2%, #222819 0, transparent 52%),
+    radial-gradient(circle at 82% 0%, #1f2226 0, transparent 42%),
+    #11130f;
+}
+
+.app-shell {
+  max-width: 1220px;
+  margin: 0 auto;
+  padding: 1.4rem 1.4rem 1.8rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  background: linear-gradient(130deg, rgba(54, 62, 36, 0.9), rgba(22, 26, 19, 0.95));
+  border: 1px solid rgba(176, 194, 117, 0.35);
+  box-shadow: inset 0 1px 0 rgba(233, 239, 209, 0.09);
+  border-radius: 14px;
+  padding: 1rem 1.15rem;
+}
+
+.hero h1 {
+  margin: 0;
+  letter-spacing: 0.03em;
+  font-size: 1.55rem;
+}
+
+.hero p {
+  margin: 0.3rem 0 0;
+  color: #d7ddc3;
+  font-size: 0.94rem;
+}
+
+.status-pill {
+  min-width: 110px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0.42rem 0.9rem;
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  border: 1px solid transparent;
+}
+
+.status-pill.running {
+  color: #d8ffd8;
+  background: #1e4f2f;
+  border-color: #5fc676;
+}
+
+.status-pill.paused {
+  color: #ffe9bd;
+  background: #5f4211;
+  border-color: #e9a73b;
+}
+
+.status-pill.idle {
+  color: #d5d9d0;
+  background: #2e3237;
+  border-color: #515861;
+}
+
+.panel {
+  border-radius: 14px;
+  border: 1px solid #353f2b;
+  background: rgba(16, 19, 14, 0.94);
+  padding: 1rem;
+  box-shadow:
+    inset 0 1px 0 rgba(243, 248, 226, 0.05),
+    0 20px 34px rgba(0, 0, 0, 0.24);
+}
+
+.grid {
+  display: grid;
+  gap: 0.78rem;
+}
+
+label {
+  display: grid;
+  gap: 0.36rem;
+  color: #e8edd6;
+  font-size: 0.92rem;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+input,
+button {
+  border-radius: 10px;
+  border: 1px solid #48553a;
+  background: #1b2016;
+  color: #f7faea;
+  font: inherit;
+}
+
+input {
+  width: 100%;
+  padding: 0.56rem 0.7rem;
+}
+
+input:focus,
+button:focus-visible {
+  outline: 2px solid #a8c453;
+  outline-offset: 1px;
+}
+
+button {
+  padding: 0.54rem 0.82rem;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+button:hover {
+  border-color: #7fa245;
+  background: #252f1b;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.grid-inline {
+  display: grid;
+  gap: 0.68rem;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.toggles {
+  margin-top: 0.1rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.35rem 0.9rem;
+}
+
+.toggles label {
+  display: flex;
+  align-items: center;
+  gap: 0.52rem;
+  font-size: 0.89rem;
+}
+
+.toggles input[type="checkbox"] {
+  accent-color: #97b748;
+  width: 1rem;
+  height: 1rem;
+}
+
+.advanced-toggle {
+  justify-self: start;
+}
+
+.action-row {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+button.primary {
+  background: linear-gradient(170deg, #4a6b25, #344d19);
+  border-color: #86ae41;
+}
+
+button.danger {
+  background: linear-gradient(170deg, #682525, #47201b);
+  border-color: #bf6666;
+}
+
+.run-meta {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  font-size: 0.84rem;
+  color: #d5dbc2;
+}
+
+.run-meta .warn {
+  color: #ffd58f;
+}
+
+.hint {
+  margin: 0.58rem 0 0;
+  color: #aeb896;
+  font-size: 0.82rem;
+}
+
+.log-panel {
+  padding-top: 0.8rem;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+
+.log-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  letter-spacing: 0.03em;
+  color: #e5ecd2;
+}
+
+.log-panel pre {
+  margin: 0;
+  min-height: 275px;
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid #3f4937;
+  background: #0e110c;
+  color: #d8e2c3;
+  padding: 0.74rem 0.78rem;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1000px) {
+  .grid-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .toggles {
+    grid-template-columns: 1fr;
+  }
+
+  .run-meta {
+    margin-left: 0;
+    align-items: flex-start;
+  }
+
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
