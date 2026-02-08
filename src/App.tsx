@@ -242,116 +242,127 @@ function App() {
     }
   }
 
+  const statusText = status.running ? (status.paused ? "PAUSED" : "RUNNING") : "IDLE";
+
   return (
     <main className="app-shell">
       <header className="hero">
-        <div>
+        <div className="hero-left">
+          <div className="hero-kicker">[ INDUSTRIAL KEYBOARD BRUTALISM ]</div>
           <h1>Church Transcriber</h1>
-          <p>Pauseable desktop runner (Tauri + Rust) for church media transcription.</p>
+          <p>Operator console for FFmpeg + whisper.cpp transcription runs.</p>
         </div>
+
         <div className={`status-pill ${status.running ? (status.paused ? "paused" : "running") : "idle"}`}>
-          {status.running ? (status.paused ? "PAUSED" : "RUNNING") : "IDLE"}
+          <span className="status-label">STATE</span>
+          <span className="status-value">{statusText}</span>
         </div>
       </header>
 
       <section className="panel">
+        <div className="panel-title">[ RUN CONFIG ]</div>
+
         <div className="grid">
-          <label>
-            Primary input folder
+          <label className="field">
+            <span className="field-title">[ PRIMARY INPUT FOLDER ]</span>
             <div className="field-row">
               <input value={primaryInput} onChange={(e) => setPrimaryInput(e.target.value)} />
-              <button type="button" onClick={() => pickFolder(setPrimaryInput, primaryInput)}>
+              <button type="button" className="key-btn" onClick={() => pickFolder(setPrimaryInput, primaryInput)}>
                 Browse
               </button>
             </div>
           </label>
 
-          <label>
-            Secondary input folder (optional)
+          <label className="field">
+            <span className="field-title">[ SECONDARY INPUT (OPTIONAL) ]</span>
             <div className="field-row">
               <input value={secondaryInput} onChange={(e) => setSecondaryInput(e.target.value)} />
-              <button type="button" onClick={() => pickFolder(setSecondaryInput, secondaryInput)}>
+              <button type="button" className="key-btn" onClick={() => pickFolder(setSecondaryInput, secondaryInput)}>
                 Browse
               </button>
             </div>
           </label>
 
-          <label>
-            Output transcript folder
+          <label className="field">
+            <span className="field-title">[ OUTPUT TRANSCRIPT FOLDER ]</span>
             <div className="field-row">
               <input value={outputFolder} onChange={(e) => setOutputFolder(e.target.value)} />
-              <button type="button" onClick={() => pickFolder(setOutputFolder, outputFolder)}>
+              <button type="button" className="key-btn" onClick={() => pickFolder(setOutputFolder, outputFolder)}>
                 Browse
               </button>
             </div>
           </label>
 
-          <label>
-            Whisper executable
+          <label className="field">
+            <span className="field-title">[ WHISPER EXECUTABLE ]</span>
             <div className="field-row">
               <input value={whisperExe} onChange={(e) => setWhisperExe(e.target.value)} />
-              <button type="button" onClick={() => pickFile(setWhisperExe, whisperExe)}>
+              <button type="button" className="key-btn" onClick={() => pickFile(setWhisperExe, whisperExe)}>
                 Browse
               </button>
             </div>
           </label>
 
-          <label>
-            Whisper model file
+          <label className="field">
+            <span className="field-title">[ WHISPER MODEL FILE ]</span>
             <div className="field-row">
               <input value={modelFile} onChange={(e) => setModelFile(e.target.value)} />
-              <button type="button" onClick={() => pickFile(setModelFile, modelFile)}>
+              <button type="button" className="key-btn" onClick={() => pickFile(setModelFile, modelFile)}>
                 Browse
               </button>
             </div>
           </label>
 
           <div className="grid-inline">
-            <label>
-              Before date (optional)
+            <label className="field">
+              <span className="field-title">[ BEFORE DATE ]</span>
               <input value={beforeDate} onChange={(e) => setBeforeDate(e.target.value)} placeholder="YYYY-MM-DD" />
             </label>
 
-            <label>
-              Threads
+            <label className="field">
+              <span className="field-title">[ THREADS ]</span>
               <input value={threads} onChange={(e) => setThreads(e.target.value)} />
             </label>
 
-            <label>
-              Test limit
-              <input value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Leave blank for full run" />
+            <label className="field">
+              <span className="field-title">[ TEST LIMIT ]</span>
+              <input value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Blank = full run" />
             </label>
           </div>
 
           <div className="toggles">
-            <label>
-              <input type="checkbox" checked={fastScan} onChange={(e) => setFastScan(e.target.checked)} /> Fast scan
+            <label className="toggle-line">
+              <input type="checkbox" checked={fastScan} onChange={(e) => setFastScan(e.target.checked)} />
+              <span>[ FAST SCAN ]</span>
             </label>
-            <label>
-              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> Force overwrite
+            <label className="toggle-line">
+              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              <span>[ FORCE OVERWRITE ]</span>
             </label>
-            <label>
-              <input type="checkbox" checked={noRecursive} onChange={(e) => setNoRecursive(e.target.checked)} /> Top folder only
+            <label className="toggle-line">
+              <input type="checkbox" checked={noRecursive} onChange={(e) => setNoRecursive(e.target.checked)} />
+              <span>[ TOP FOLDER ONLY ]</span>
             </label>
-            <label>
-              <input type="checkbox" checked={keepAudio} onChange={(e) => setKeepAudio(e.target.checked)} /> Keep WAV files
+            <label className="toggle-line">
+              <input type="checkbox" checked={keepAudio} onChange={(e) => setKeepAudio(e.target.checked)} />
+              <span>[ KEEP WAV FILES ]</span>
             </label>
           </div>
 
-          <button type="button" className="advanced-toggle" onClick={() => setShowAdvanced((v) => !v)}>
-            {showAdvanced ? "Hide" : "Show"} advanced
+          <button type="button" className="advanced-toggle key-btn" onClick={() => setShowAdvanced((v) => !v)}>
+            {showAdvanced ? "Hide" : "Show"} Advanced
           </button>
 
           {showAdvanced ? (
-            <label>
-              Script path override (optional)
+            <label className="field">
+              <span className="field-title">[ SCRIPT PATH OVERRIDE ]</span>
               <div className="field-row">
                 <input
                   value={scriptPath}
                   onChange={(e) => setScriptPath(e.target.value)}
                   placeholder="Auto-detected if empty"
                 />
-                <button type="button" onClick={() => pickFile(setScriptPath, scriptPath)}>
+                <button type="button" className="key-btn" onClick={() => pickFile(setScriptPath, scriptPath)}>
                   Browse
                 </button>
               </div>
@@ -360,29 +371,36 @@ function App() {
         </div>
 
         <div className="action-row">
-          <button type="button" className="primary" disabled={busy || status.running} onClick={runTranscription}>
+          <button
+            type="button"
+            className="key-btn key-btn--accent"
+            disabled={busy || status.running}
+            onClick={runTranscription}
+          >
             Run Transcription
           </button>
-          <button type="button" disabled={busy || !status.running} onClick={togglePause}>
+
+          <button type="button" className="key-btn" disabled={busy || !status.running} onClick={togglePause}>
             {status.paused ? "Resume" : "Pause"}
           </button>
-          <button type="button" className="danger" disabled={busy || !status.running} onClick={stopRun}>
+
+          <button type="button" className="key-btn key-btn--danger" disabled={busy || !status.running} onClick={stopRun}>
             Stop
           </button>
 
           <div className="run-meta">
-            <span>{stageLabel}</span>
-            {status.stopRequested ? <span className="warn">Stop requested…</span> : null}
+            <span className="run-meta-main">{stageLabel}</span>
+            {status.stopRequested ? <span className="warn">[ STOP REQUESTED ]</span> : null}
           </div>
         </div>
 
-        <p className="hint">Pause uses safe checkpoints. The current ffmpeg/whisper step may finish before pausing.</p>
+        <p className="hint">Pause is checkpoint-based. Active ffmpeg/whisper step may finish before pause engages.</p>
       </section>
 
       <section className="panel log-panel">
         <div className="log-header">
-          <h2>Live log</h2>
-          <button type="button" onClick={() => setLogs([])}>
+          <h2>[ LIVE LOG ]</h2>
+          <button type="button" className="key-btn" onClick={() => setLogs([])}>
             Clear
           </button>
         </div>
