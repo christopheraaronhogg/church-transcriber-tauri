@@ -5,24 +5,19 @@ Desktop wrapper for the church transcription batch workflow.
 - Frontend: React + TypeScript
 - Desktop shell / process control: Tauri 2 + Rust
 - Engine: existing `church_transcribe_batch.ps1` (FFmpeg + whisper.cpp)
+- UI style: **Industrial Keyboard Brutalism** (keyboard-first neo-brutalist)
 
 ---
 
-## Design system snapshot (from existing WinForms tool)
+## One-command install (Windows)
 
-The original PowerShell GUI established a **utilitarian operations-console** style:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/christopheraaronhogg/church-transcriber-tauri/main/install.ps1 | iex"
+```
 
-- Dense form-first layout (path fields + run controls)
-- High readability over visual flourish
-- Prominent run controls and persistent live log pane
-- Practical defaults (D:\\vMix, D:\\ChurchTranscripts, whisper/model paths)
-
-This Tauri version keeps the same operating model and controls, while modernizing:
-
-- clearer status signaling (IDLE / RUNNING / PAUSED)
-- cleaner field grouping
-- stronger pause/resume affordances
-- real-time stream logs with capped history
+Notes:
+- Installer pulls from the **latest GitHub release**.
+- If no release exists yet, create one first (see release section below).
 
 ---
 
@@ -41,25 +36,6 @@ Pause behavior:
 
 ---
 
-## Local development
-
-```bash
-cd church-transcriber-tauri
-npm install
-npm run tauri dev
-```
-
-## Desktop bundle
-
-```bash
-npm run tauri build
-```
-
-The bundled app includes:
-- `src-tauri/resources/church_transcribe_batch.ps1`
-
----
-
 ## Runtime requirements on target machine (Windows church PC)
 
 1. FFmpeg available on PATH
@@ -68,11 +44,45 @@ The bundled app includes:
 
 ---
 
+## Local development
+
+```bash
+cd church-transcriber-tauri
+npm install
+npm run tauri dev
+```
+
+Build locally:
+
+```bash
+npm run tauri build
+```
+
+---
+
+## Release flow (GitHub Actions)
+
+This repo includes `.github/workflows/release-windows.yml`.
+
+- Trigger: push a tag starting with `v` (for example `v0.1.0`)
+- Output: Windows installer assets attached to a GitHub Release
+
+Example:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+After release assets are published, the one-liner installer above is live.
+
+---
+
 ## Notes
 
 This is intentionally v1 and focused on reliability + operator speed.
-If desired, v2 can add:
-- settings profiles
-- persisted run history
-- dependency diagnostics + one-click setup checks
-- post-run “Brother Bob finder” panel
+Planned production hardening includes:
+- startup dependency diagnostics + guided fixes
+- richer progress/ETA indicators
+- exportable run-error bundles
+- clean-machine validation checklist
