@@ -44,6 +44,25 @@ function Wait-IfPaused {
   }
 }
 
+function Emit-Progress {
+  param(
+    [int]$Done,
+    [int]$Total,
+    [string]$Status = "",
+    [string]$Source = ""
+  )
+
+  $line = "[progress] done=$Done total=$Total"
+  if (-not [string]::IsNullOrWhiteSpace($Status)) {
+    $line += " status=$Status"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Source)) {
+    $line += " source=$Source"
+  }
+
+  Write-Host $line
+}
+
 function Get-Slug {
   param([string]$Text)
   if ([string]::IsNullOrWhiteSpace($Text)) { return "service" }
@@ -215,10 +234,16 @@ if ($Limit -gt 0) {
 
 if (-not $mediaFiles -or $mediaFiles.Count -eq 0) {
   Write-Host "No media files found."
+  Emit-Progress -Done 0 -Total 0 -Status "empty"
   exit 0
 }
 
-Write-Host "Found $($mediaFiles.Count) media files"
+$totalFiles = [int]$mediaFiles.Count
+$processed = 0
+
+Write-Host "Found $totalFiles media files"
+Emit-Progress -Done 0 -Total $totalFiles -Status "start"
+
 if (-not [string]::IsNullOrWhiteSpace($BeforeDate)) {
   Write-Host "Date filter: only files with inferred date <= $BeforeDate"
 }
@@ -241,6 +266,8 @@ foreach ($file in $mediaFiles) {
   if (-not [string]::IsNullOrWhiteSpace($BeforeDate) -and $dateBucket -gt $BeforeDate) {
     Write-Host "[skip] date $dateBucket is after cutoff $BeforeDate"
     $results.Add([pscustomobject]@{ Status = "skipped-date"; Source = $file.FullName; Output = "" })
+    $processed += 1
+    Emit-Progress -Done $processed -Total $totalFiles -Status "skipped-date" -Source $file.FullName
     continue
   }
 
@@ -265,6 +292,8 @@ foreach ($file in $mediaFiles) {
   if ((Test-Path -LiteralPath $rawPath) -and (-not $Force)) {
     Write-Host "[skip] raw.txt exists"
     $results.Add([pscustomobject]@{ Status = "skipped"; Source = $file.FullName; Output = $serviceDir })
+    $processed += 1
+    Emit-Progress -Done $processed -Total $totalFiles -Status "skipped" -Source $file.FullName
     continue
   }
 
@@ -276,6 +305,8 @@ foreach ($file in $mediaFiles) {
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "ffmpeg failed: $($file.FullName)"
     $results.Add([pscustomobject]@{ Status = "error"; Source = $file.FullName; Output = $serviceDir; Reason = "ffmpeg" })
+    $processed += 1
+    Emit-Progress -Done $processed -Total $totalFiles -Status "error-ffmpeg" -Source $file.FullName
     continue
   }
 
@@ -289,6 +320,8 @@ foreach ($file in $mediaFiles) {
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "whisper failed: $($file.FullName)"
     $results.Add([pscustomobject]@{ Status = "error"; Source = $file.FullName; Output = $serviceDir; Reason = "whisper" })
+    $processed += 1
+    Emit-Progress -Done $processed -Total $totalFiles -Status "error-whisper" -Source $file.FullName
     continue
   }
 
@@ -338,6 +371,8 @@ foreach ($file in $mediaFiles) {
   }
 
   $results.Add([pscustomobject]@{ Status = "ok"; Source = $file.FullName; Output = $serviceDir })
+  $processed += 1
+  Emit-Progress -Done $processed -Total $totalFiles -Status "ok" -Source $file.FullName
 }
 
 $indexPath = Join-Path $outputResolved "INDEX.md"
@@ -360,6 +395,7 @@ $err = ($results | Where-Object { $_.Status -eq "error" }).Count
 $sk = ($results | Where-Object { $_.Status -eq "skipped" }).Count
 
 Write-Host ""
+Emit-Progress -Done $processed -Total $totalFiles -Status "complete"
 Write-Host "Done. ok=$ok error=$err skipped=$sk"
 Write-Host "Index: $indexPath"
 

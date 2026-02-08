@@ -6,7 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -33,6 +33,34 @@ struct StartRequest {
     no_recursive: bool,
     keep_audio: bool,
     script_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreflightRequest {
+    input_folders: Vec<String>,
+    output_folder: String,
+    whisper_exe: String,
+    model_file: String,
+    script_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreflightCheck {
+    key: String,
+    ok: bool,
+    detail: String,
+    fix: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreflightReport {
+    ready: bool,
+    checks: Vec<PreflightCheck>,
+    resolved_script_path: Option<String>,
+    generated_at_epoch: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,7 +149,247 @@ fn resolve_script_path(app: &AppHandle, requested: Option<String>) -> Result<Pat
         }
     }
 
-    Err("Could not locate church_transcribe_batch.ps1. Set Script Path in Advanced settings.".to_string())
+    Err("Could not locate church_transcribe_batch.ps1. Set Script Path in Advanced settings."
+        .to_string())
+}
+
+fn command_exists(bin: &str) -> bool {
+    if bin.trim().is_empty() {
+        return false;
+    }
+
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("where");
+        c.arg(bin);
+        c
+    } else {
+        let mut c = Command::new("which");
+        c.arg(bin);
+        c
+    };
+
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn looks_like_path(value: &str) -> bool {
+    value.contains('\\') || value.contains('/') || value.contains(':')
+}
+
+fn build_preflight_report(app: &AppHandle, request: &PreflightRequest) -> PreflightReport {
+    let mut checks: Vec<PreflightCheck> = Vec::new();
+
+    let mut push = |key: &str, ok: bool, detail: String, fix: &str| {
+        checks.push(PreflightCheck {
+            key: key.to_string(),
+            ok,
+            detail,
+            fix: fix.to_string(),
+        });
+    };
+
+    let powershell_bin = if cfg!(target_os = "windows") {
+        "powershell"
+    } else {
+        "pwsh"
+    };
+
+    let powershell_ok = command_exists(powershell_bin);
+    push(
+        "powershell",
+        powershell_ok,
+        if powershell_ok {
+            format!("Found '{powershell_bin}' on PATH")
+        } else {
+            format!("'{powershell_bin}' not found on PATH")
+        },
+        "Install PowerShell and ensure it is available on PATH.",
+    );
+
+    let ffmpeg_ok = command_exists("ffmpeg");
+    push(
+        "ffmpeg",
+        ffmpeg_ok,
+        if ffmpeg_ok {
+            "Found 'ffmpeg' on PATH".to_string()
+        } else {
+            "ffmpeg not found on PATH".to_string()
+        },
+        "Install ffmpeg (example: winget install Gyan.FFmpeg) and reopen the app.",
+    );
+
+    if request.input_folders.is_empty() {
+        push(
+            "inputFolders",
+            false,
+            "No input folders were provided".to_string(),
+            "Set at least one valid input folder.",
+        );
+    } else {
+        for folder in &request.input_folders {
+            let trimmed = folder.trim();
+            let p = PathBuf::from(trimmed);
+            let ok = !trimmed.is_empty() && p.exists() && p.is_dir();
+            push(
+                "inputFolder",
+                ok,
+                if ok {
+                    format!("Input folder OK: {}", p.display())
+                } else {
+                    format!("Input folder missing/not directory: {}", p.display())
+                },
+                "Select a valid folder containing church media files.",
+            );
+        }
+    }
+
+    let output_trimmed = request.output_folder.trim();
+    if output_trimmed.is_empty() {
+        push(
+            "outputFolder",
+            false,
+            "Output folder is empty".to_string(),
+            "Choose a writable output folder (example: D:\\ChurchTranscripts).",
+        );
+    } else {
+        let output_path = PathBuf::from(output_trimmed);
+        let mut ok = true;
+        let detail: String;
+
+        if output_path.exists() {
+            if output_path.is_dir() {
+                detail = format!("Output folder exists: {}", output_path.display());
+            } else {
+                ok = false;
+                detail = format!("Output path is a file, not a folder: {}", output_path.display());
+            }
+        } else {
+            match fs::create_dir_all(&output_path) {
+                Ok(_) => {
+                    detail = format!("Output folder created: {}", output_path.display());
+                }
+                Err(err) => {
+                    ok = false;
+                    detail = format!(
+                        "Failed to create output folder {}: {err}",
+                        output_path.display()
+                    );
+                }
+            }
+        }
+
+        if ok {
+            let probe = output_path.join(".church-transcriber-write-test");
+            match fs::write(&probe, b"ok") {
+                Ok(_) => {
+                    let _ = fs::remove_file(&probe);
+                }
+                Err(err) => {
+                    ok = false;
+                    push(
+                        "outputWritable",
+                        false,
+                        format!("Cannot write to output folder {}: {err}", output_path.display()),
+                        "Pick a writable folder, then run preflight again.",
+                    );
+                }
+            }
+        }
+
+        push(
+            "outputFolder",
+            ok,
+            detail,
+            "Pick a valid writable output folder.",
+        );
+    }
+
+    let whisper_trimmed = request.whisper_exe.trim();
+    if whisper_trimmed.is_empty() {
+        push(
+            "whisperExe",
+            false,
+            "Whisper executable path is empty".to_string(),
+            "Set whisper executable path (example: C:\\ai\\whisper\\whisper-cli.exe).",
+        );
+    } else {
+        let ok = if looks_like_path(whisper_trimmed) {
+            let p = PathBuf::from(whisper_trimmed);
+            p.exists() && p.is_file()
+        } else {
+            command_exists(whisper_trimmed)
+        };
+
+        push(
+            "whisperExe",
+            ok,
+            if ok {
+                format!("Whisper executable OK: {whisper_trimmed}")
+            } else {
+                format!("Whisper executable not found: {whisper_trimmed}")
+            },
+            "Install whisper.cpp binary and set the exact whisper-cli.exe path.",
+        );
+    }
+
+    let model_trimmed = request.model_file.trim();
+    if model_trimmed.is_empty() {
+        push(
+            "modelFile",
+            false,
+            "Model file path is empty".to_string(),
+            "Set model path (example: C:\\ai\\whisper-models\\ggml-small.en.bin).",
+        );
+    } else {
+        let p = PathBuf::from(model_trimmed);
+        let ok = p.exists() && p.is_file();
+        push(
+            "modelFile",
+            ok,
+            if ok {
+                format!("Model file OK: {}", p.display())
+            } else {
+                format!("Model file missing: {}", p.display())
+            },
+            "Download model file and set the correct full path.",
+        );
+    }
+
+    let mut resolved_script_path: Option<String> = None;
+    match resolve_script_path(app, request.script_path.clone()) {
+        Ok(path) => {
+            resolved_script_path = Some(path.display().to_string());
+            push(
+                "batchScript",
+                true,
+                format!("Batch script resolved: {}", path.display()),
+                "",
+            );
+        }
+        Err(err) => {
+            push(
+                "batchScript",
+                false,
+                err,
+                "Set Script Path override to church_transcribe_batch.ps1.",
+            );
+        }
+    }
+
+    let ready = checks.iter().all(|c| c.ok);
+
+    PreflightReport {
+        ready,
+        checks,
+        resolved_script_path,
+        generated_at_epoch: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    }
 }
 
 fn get_status(state: &RunnerState) -> RunnerStatus {
@@ -398,6 +666,36 @@ fn spawn_worker(app: AppHandle, request: StartRequest) {
 }
 
 #[tauri::command]
+fn run_preflight(app: AppHandle, request: PreflightRequest) -> PreflightReport {
+    build_preflight_report(&app, &request)
+}
+
+#[tauri::command]
+fn export_run_logs(output_folder: String, lines: Vec<String>) -> Result<String, String> {
+    let folder = output_folder.trim();
+    if folder.is_empty() {
+        return Err("Output folder is required for log export.".to_string());
+    }
+
+    let output_path = PathBuf::from(folder);
+    fs::create_dir_all(&output_path)
+        .map_err(|err| format!("Could not create output folder {}: {err}", output_path.display()))?;
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let file_path = output_path.join(format!("church-transcriber-log-{ts}.txt"));
+    let body = lines.join("\n");
+
+    fs::write(&file_path, body)
+        .map_err(|err| format!("Failed to write log export {}: {err}", file_path.display()))?;
+
+    Ok(file_path.display().to_string())
+}
+
+#[tauri::command]
 fn start_transcription(
     app: AppHandle,
     state: State<RunnerState>,
@@ -407,16 +705,35 @@ fn start_transcription(
         return Err("At least one input folder is required.".to_string());
     }
 
-    if request.output_folder.trim().is_empty() {
-        return Err("Output folder is required.".to_string());
+    {
+        let running = state
+            .running
+            .lock()
+            .map_err(|_| "Runner state lock failed".to_string())?;
+
+        if *running {
+            return Err("A transcription run is already in progress.".to_string());
+        }
     }
 
-    if request.whisper_exe.trim().is_empty() {
-        return Err("Whisper executable path is required.".to_string());
-    }
+    let preflight_req = PreflightRequest {
+        input_folders: request.input_folders.clone(),
+        output_folder: request.output_folder.clone(),
+        whisper_exe: request.whisper_exe.clone(),
+        model_file: request.model_file.clone(),
+        script_path: request.script_path.clone(),
+    };
 
-    if request.model_file.trim().is_empty() {
-        return Err("Model file path is required.".to_string());
+    let preflight = build_preflight_report(&app, &preflight_req);
+    if !preflight.ready {
+        let failed = preflight
+            .checks
+            .iter()
+            .filter(|c| !c.ok)
+            .map(|c| format!("{}: {}", c.key, c.detail))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(format!("Preflight failed. {failed}"));
     }
 
     let mut running = state
@@ -514,6 +831,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            run_preflight,
+            export_run_logs,
             start_transcription,
             toggle_pause,
             stop_transcription,

@@ -42,6 +42,28 @@ type StartRequest = {
   scriptPath?: string;
 };
 
+type PreflightRequest = {
+  inputFolders: string[];
+  outputFolder: string;
+  whisperExe: string;
+  modelFile: string;
+  scriptPath?: string;
+};
+
+type PreflightCheck = {
+  key: string;
+  ok: boolean;
+  detail: string;
+  fix: string;
+};
+
+type PreflightReport = {
+  ready: boolean;
+  checks: PreflightCheck[];
+  resolvedScriptPath?: string;
+  generatedAtEpoch: number;
+};
+
 const MAX_LOG_LINES = 1200;
 
 function App() {
@@ -67,16 +89,22 @@ function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [busy, setBusy] = useState(false);
+  const [preflightBusy, setPreflightBusy] = useState(false);
   const [stageLabel, setStageLabel] = useState("Idle");
   const [logs, setLogs] = useState<string[]>([
     "[system] Ready.",
     "[system] Pause uses safe checkpoints (current ffmpeg/whisper step may finish first).",
   ]);
+  const [preflight, setPreflight] = useState<PreflightReport | null>(null);
+  const [progressDone, setProgressDone] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
 
   const inputFolders = useMemo(
     () => [primaryInput.trim(), secondaryInput.trim()].filter(Boolean),
     [primaryInput, secondaryInput],
   );
+
+  const progressPercent = progressTotal > 0 ? Math.min(100, Math.round((progressDone / progressTotal) * 100)) : 0;
 
   function pushLog(stream: string, text: string) {
     const line = `[${stream}] ${text}`;
@@ -87,6 +115,62 @@ function App() {
       }
       return next;
     });
+  }
+
+  function ingestLog(stream: string, line: string) {
+    pushLog(stream, line);
+
+    const match = line.match(/\[progress\]\s+done=(\d+)\s+total=(\d+)(?:\s+status=([^\s]+))?/i);
+    if (match) {
+      const done = Number.parseInt(match[1] || "0", 10);
+      const total = Number.parseInt(match[2] || "0", 10);
+      if (!Number.isNaN(done)) setProgressDone(done);
+      if (!Number.isNaN(total)) setProgressTotal(total);
+
+      if ((match[3] || "").toLowerCase() === "complete") {
+        setStageLabel("Processing complete");
+      }
+    }
+  }
+
+  function buildPreflightRequest(): PreflightRequest {
+    return {
+      inputFolders,
+      outputFolder: outputFolder.trim(),
+      whisperExe: whisperExe.trim(),
+      modelFile: modelFile.trim(),
+      scriptPath: scriptPath.trim() ? scriptPath.trim() : undefined,
+    };
+  }
+
+  async function runPreflightChecks(logSummary = true): Promise<PreflightReport | null> {
+    try {
+      setPreflightBusy(true);
+      const report = await invoke<PreflightReport>("run_preflight", {
+        request: buildPreflightRequest(),
+      });
+
+      setPreflight(report);
+
+      if (logSummary) {
+        if (report.ready) {
+          ingestLog("preflight", "All checks passed. System ready.");
+        } else {
+          const failed = report.checks.filter((c) => !c.ok);
+          ingestLog("preflight", `Preflight found ${failed.length} issue(s).`);
+          failed.slice(0, 6).forEach((check) => {
+            ingestLog("preflight", `${check.key}: ${check.detail} | fix: ${check.fix}`);
+          });
+        }
+      }
+
+      return report;
+    } catch (error) {
+      ingestLog("system", `Preflight failed to run: ${String(error)}`);
+      return null;
+    } finally {
+      setPreflightBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -104,11 +188,13 @@ function App() {
           }
         }
       } catch (error) {
-        pushLog("system", `Could not read initial status: ${String(error)}`);
+        ingestLog("system", `Could not read initial status: ${String(error)}`);
       }
 
+      await runPreflightChecks(false);
+
       const unlistenLog = await listen<LogEvent>("transcribe://log", (event) => {
-        pushLog(event.payload.stream, event.payload.line);
+        ingestLog(event.payload.stream, event.payload.line);
       });
       unsubs.push(unlistenLog);
 
@@ -121,14 +207,14 @@ function App() {
         const { index, total, inputFolder } = event.payload;
         const label = `Running ${index}/${total}: ${inputFolder}`;
         setStageLabel(label);
-        pushLog("stage", label);
+        ingestLog("stage", label);
       });
       unsubs.push(unlistenStage);
 
       const unlistenFinished = await listen<FinishEvent>("transcribe://finished", (event) => {
         const { success, code, message } = event.payload;
         setStageLabel(success ? "Complete" : "Stopped / Failed");
-        pushLog("system", `${success ? "Complete" : "Ended"} (code ${code}): ${message}`);
+        ingestLog("system", `${success ? "Complete" : "Ended"} (code ${code}): ${message}`);
       });
       unsubs.push(unlistenFinished);
     })();
@@ -167,13 +253,19 @@ function App() {
 
   async function runTranscription() {
     if (inputFolders.length === 0) {
-      pushLog("system", "Primary input folder is required.");
+      ingestLog("system", "Primary input folder is required.");
       return;
     }
 
     const parsedThreads = Number.parseInt(threads, 10);
     if (Number.isNaN(parsedThreads) || parsedThreads < 1) {
-      pushLog("system", "Threads must be a positive number.");
+      ingestLog("system", "Threads must be a positive number.");
+      return;
+    }
+
+    const pre = await runPreflightChecks(true);
+    if (!pre || !pre.ready) {
+      setStageLabel("Blocked by preflight");
       return;
     }
 
@@ -196,11 +288,13 @@ function App() {
     try {
       setBusy(true);
       setStageLabel("Starting...");
-      pushLog("system", "Starting transcription run...");
+      setProgressDone(0);
+      setProgressTotal(0);
+      ingestLog("system", "Starting transcription run...");
       const nextStatus = await invoke<RunnerStatus>("start_transcription", { request });
       setStatus(nextStatus);
     } catch (error) {
-      pushLog("system", `Start failed: ${String(error)}`);
+      ingestLog("system", `Start failed: ${String(error)}`);
       setStageLabel("Idle");
     } finally {
       setBusy(false);
@@ -219,7 +313,7 @@ function App() {
       setStatus(nextStatus);
       setStageLabel(nextPaused ? "Pause requested" : "Resuming");
     } catch (error) {
-      pushLog("system", `Pause/resume failed: ${String(error)}`);
+      ingestLog("system", `Pause/resume failed: ${String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -236,9 +330,22 @@ function App() {
       setStatus(nextStatus);
       setStageLabel("Stopping...");
     } catch (error) {
-      pushLog("system", `Stop failed: ${String(error)}`);
+      ingestLog("system", `Stop failed: ${String(error)}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportLogs() {
+    try {
+      const targetOutput = outputFolder.trim() || "D:\\ChurchTranscripts";
+      const path = await invoke<string>("export_run_logs", {
+        outputFolder: targetOutput,
+        lines: logs,
+      });
+      ingestLog("system", `Log export saved: ${path}`);
+    } catch (error) {
+      ingestLog("system", `Log export failed: ${String(error)}`);
     }
   }
 
@@ -388,10 +495,60 @@ function App() {
             Stop
           </button>
 
+          <button
+            type="button"
+            className="key-btn"
+            disabled={busy || preflightBusy || status.running}
+            onClick={() => runPreflightChecks(true)}
+          >
+            {preflightBusy ? "Checking..." : "Run Preflight"}
+          </button>
+
           <div className="run-meta">
             <span className="run-meta-main">{stageLabel}</span>
             {status.stopRequested ? <span className="warn">[ STOP REQUESTED ]</span> : null}
           </div>
+        </div>
+
+        <div className="progress-card">
+          <div className="progress-head">
+            <span>[ FILE PROGRESS ]</span>
+            <span>
+              {progressDone}/{progressTotal || "?"}
+            </span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
+          </div>
+        </div>
+
+        <div className={`preflight-card ${preflight?.ready ? "preflight-card--ok" : "preflight-card--bad"}`}>
+          <div className="preflight-head">
+            <span>[ PREFLIGHT STATUS ]</span>
+            <span>{preflight ? (preflight.ready ? "READY" : "NOT READY") : "NOT RUN"}</span>
+          </div>
+
+          {preflight ? (
+            <>
+              <ul className="preflight-list">
+                {preflight.checks.map((check, index) => (
+                  <li key={`${check.key}-${index}`} className={check.ok ? "ok" : "bad"}>
+                    <span className="preflight-pill">{check.ok ? "OK" : "FIX"}</span>
+                    <div className="preflight-copy">
+                      <div className="preflight-key">{check.key}</div>
+                      <div>{check.detail}</div>
+                      {!check.ok ? <div className="preflight-fix">→ {check.fix}</div> : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {preflight.resolvedScriptPath ? (
+                <div className="preflight-script">Script: {preflight.resolvedScriptPath}</div>
+              ) : null}
+            </>
+          ) : (
+            <p className="preflight-empty">Run preflight to validate this machine before production runs.</p>
+          )}
         </div>
 
         <p className="hint">Pause is checkpoint-based. Active ffmpeg/whisper step may finish before pause engages.</p>
@@ -400,9 +557,14 @@ function App() {
       <section className="panel log-panel">
         <div className="log-header">
           <h2>[ LIVE LOG ]</h2>
-          <button type="button" className="key-btn" onClick={() => setLogs([])}>
-            Clear
-          </button>
+          <div className="log-actions">
+            <button type="button" className="key-btn" onClick={exportLogs}>
+              Export Log
+            </button>
+            <button type="button" className="key-btn" onClick={() => setLogs([])}>
+              Clear
+            </button>
+          </div>
         </div>
         <pre>{logs.join("\n")}</pre>
       </section>

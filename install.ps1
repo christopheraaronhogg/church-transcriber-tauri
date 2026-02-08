@@ -1,6 +1,11 @@
 param(
   [string]$Repo = "christopheraaronhogg/church-transcriber-tauri",
-  [switch]$Silent
+  [switch]$Silent,
+  [switch]$SkipDependencies,
+  [string]$WhisperDir = "C:\ai\whisper",
+  [string]$ModelDir = "C:\ai\whisper-models",
+  [string]$ModelName = "ggml-small.en.bin",
+  [switch]$NoLaunch
 )
 
 Set-StrictMode -Version Latest
@@ -20,6 +25,11 @@ try {
 function Write-Step {
   param([string]$Message)
   Write-Host "[church-transcriber-install] $Message" -ForegroundColor Cyan
+}
+
+function Write-WarnStep {
+  param([string]$Message)
+  Write-Host "[church-transcriber-install] $Message" -ForegroundColor Yellow
 }
 
 function Get-LatestRelease {
@@ -100,6 +110,115 @@ function Install-Asset {
   throw "Unsupported installer type: $Path"
 }
 
+function Ensure-Winget {
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  return $null -ne $winget
+}
+
+function Ensure-Ffmpeg {
+  $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+  if ($ffmpeg) {
+    Write-Step "ffmpeg already available: $($ffmpeg.Source)"
+    return
+  }
+
+  if (-not (Ensure-Winget)) {
+    throw "winget not found, cannot auto-install ffmpeg. Install FFmpeg manually and re-run."
+  }
+
+  Write-Step "Installing ffmpeg via winget (Gyan.FFmpeg)..."
+  $args = @(
+    'install',
+    '--id', 'Gyan.FFmpeg',
+    '--exact',
+    '--silent',
+    '--accept-package-agreements',
+    '--accept-source-agreements'
+  )
+
+  $proc = Start-Process -FilePath 'winget' -ArgumentList $args -PassThru -Wait
+  if ($proc.ExitCode -ne 0) {
+    throw "winget ffmpeg install failed with exit code $($proc.ExitCode)."
+  }
+
+  $ffmpegAfter = Get-Command ffmpeg -ErrorAction SilentlyContinue
+  if ($ffmpegAfter) {
+    Write-Step "ffmpeg installed: $($ffmpegAfter.Source)"
+  } else {
+    Write-WarnStep "ffmpeg installed but not yet on this session PATH. New terminal/session may be required."
+  }
+}
+
+function Ensure-WhisperCli {
+  param([string]$TargetDir)
+
+  New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+
+  $existing = Get-ChildItem -Path $TargetDir -Recurse -File -Filter 'whisper-cli.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($existing) {
+    Write-Step "whisper-cli already present: $($existing.FullName)"
+    return $existing.FullName
+  }
+
+  $downloadDir = Join-Path $env:TEMP 'church-transcriber-whisper'
+  New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+
+  $zipPath = Join-Path $downloadDir 'whisper-bin-x64.zip'
+  $extractPath = Join-Path $downloadDir 'extract'
+  if (Test-Path -LiteralPath $extractPath) {
+    Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+
+  $binUrl = 'https://github.com/ggerganov/whisper.cpp/releases/latest/download/whisper-bin-x64.zip'
+  Write-Step "Downloading whisper.cpp binary package..."
+  Invoke-WebRequest -Uri $binUrl -OutFile $zipPath -UseBasicParsing
+
+  Write-Step "Extracting whisper.cpp binaries..."
+  Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+  $cliCandidate = Get-ChildItem -Path $extractPath -Recurse -File -Filter 'whisper-cli.exe' | Select-Object -First 1
+  if (-not $cliCandidate) {
+    throw "Could not locate whisper-cli.exe in downloaded whisper.cpp package."
+  }
+
+  $cliDir = Split-Path -Parent $cliCandidate.FullName
+  Write-Step "Installing whisper runtime files to $TargetDir"
+  Copy-Item -Path (Join-Path $cliDir '*') -Destination $TargetDir -Recurse -Force
+
+  $installed = Get-ChildItem -Path $TargetDir -Recurse -File -Filter 'whisper-cli.exe' | Select-Object -First 1
+  if (-not $installed) {
+    throw "whisper-cli install failed: executable not found in $TargetDir after copy."
+  }
+
+  return $installed.FullName
+}
+
+function Ensure-Model {
+  param(
+    [string]$TargetDir,
+    [string]$FileName
+  )
+
+  New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+
+  $targetPath = Join-Path $TargetDir $FileName
+  if (Test-Path -LiteralPath $targetPath) {
+    Write-Step "Model already present: $targetPath"
+    return $targetPath
+  }
+
+  $url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$FileName"
+  Write-Step "Downloading whisper model ($FileName)..."
+  Invoke-WebRequest -Uri $url -OutFile $targetPath -UseBasicParsing
+
+  if (-not (Test-Path -LiteralPath $targetPath)) {
+    throw "Model download failed: $targetPath not found after download."
+  }
+
+  return $targetPath
+}
+
 Write-Step "Checking latest release for $Repo"
 $release = Get-LatestRelease -Repository $Repo
 $asset = Select-InstallerAsset -Release $release
@@ -114,8 +233,21 @@ $installerPath = Join-Path $downloadDir $asset.name
 Write-Step "Downloading installer..."
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -UseBasicParsing
 
-Write-Step "Installing..."
+Write-Step "Installing app..."
 Install-Asset -Path $installerPath -SilentInstall:$Silent
+
+$whisperCliPath = Join-Path $WhisperDir 'whisper-cli.exe'
+$modelPath = Join-Path $ModelDir $ModelName
+
+if (-not $SkipDependencies) {
+  Write-Step "Installing dependencies (ffmpeg + whisper.cpp + model)..."
+
+  Ensure-Ffmpeg
+  $whisperCliPath = Ensure-WhisperCli -TargetDir $WhisperDir
+  $modelPath = Ensure-Model -TargetDir $ModelDir -FileName $ModelName
+} else {
+  Write-WarnStep "Skipping dependency install because -SkipDependencies was provided."
+}
 
 $candidateExePaths = @(
   (Join-Path $env:LOCALAPPDATA 'Programs\Church Transcriber\Church Transcriber.exe'),
@@ -124,13 +256,19 @@ $candidateExePaths = @(
 )
 
 $installedExe = $candidateExePaths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-if ($installedExe) {
+if ($installedExe -and -not $NoLaunch) {
   Write-Step "Launching app..."
   Start-Process -FilePath $installedExe | Out-Null
 }
 
 Write-Host ""
 Write-Host "✅ Church Transcriber installed from release $($release.tag_name)." -ForegroundColor Green
+Write-Host "Repo: https://github.com/$Repo" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "Recommended app paths:" -ForegroundColor Cyan
+Write-Host "- Whisper executable: $whisperCliPath"
+Write-Host "- Model file:        $modelPath"
+Write-Host ""
 if (-not $installedExe) {
   Write-Host "Launch from Start Menu: Church Transcriber" -ForegroundColor Yellow
 }
